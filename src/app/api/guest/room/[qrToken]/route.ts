@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { ensureDbSeeded } from "@/lib/seedHelper";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ qrToken: string }> }
 ) {
   try {
+    await ensureDbSeeded();
     const { qrToken } = await params;
 
     const room = await db.room.findUnique({

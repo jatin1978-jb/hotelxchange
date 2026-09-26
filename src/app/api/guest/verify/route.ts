@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { ensureDbSeeded } from "@/lib/seedHelper";
 import { randomBytes } from "crypto";
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureDbSeeded();
     const { secureRoomToken, guestLastName } = await req.json();
 
     if (!secureRoomToken || !guestLastName) {

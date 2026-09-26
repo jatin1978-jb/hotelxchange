@@ -34,14 +34,21 @@ export default function Home() {
               href="/guest/room/room-101-demo"
               className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl bg-emerald-600 text-white font-medium text-sm hover:bg-emerald-700 transition-colors"
             >
-              <span>Scan QR Room 101</span>
+              <span>Scan QR Room 101 (Bhai)</span>
               <ArrowRight className="w-4 h-4" />
             </Link>
             <Link
-              href="/guest/room/room-305-demo"
-              className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-medium text-xs hover:bg-slate-200 transition-colors"
+              href="/guest/room/hx-room-1204-qr"
+              className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl bg-[#0A4D7E] text-white font-medium text-xs hover:bg-[#083e66] transition-colors"
             >
-              <span>Scan QR Room 305 (Suite)</span>
+              <span>Scan QR Room 1204 (Sharma)</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+            <Link
+              href="/r/hx-room-1204-qr"
+              className="w-full flex items-center justify-between px-4 py-2 rounded-xl bg-amber-500/10 text-amber-800 border border-amber-500/20 font-medium text-xs hover:bg-amber-500/20 transition-colors"
+            >
+              <span>Opaque Room QR Verification (/r/...)</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>

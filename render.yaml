@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: hotelxchange
+    env: node
+    region: singapore
+    plan: free
+    buildCommand: npm install && npx prisma db push && npm run db:seed && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000

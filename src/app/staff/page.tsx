@@ -1,34 +1,41 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   UserCheck,
   Clock,
-  AlertTriangle,
   CheckCircle2,
-  Building,
+  AlertTriangle,
+  Bell,
   RefreshCw,
-  Utensils,
-  Filter,
+  LogOut,
   Play,
-  Check,
+  CheckSquare,
+  Sparkles,
+  Hotel,
+  ShieldCheck,
+  Send,
+  Smartphone,
+  X,
+  Sliders,
 } from "lucide-react";
 
 export default function StaffQueuePage() {
+  const [staffUser, setStaffUser] = useState<any>(null);
+  const [branding, setBranding] = useState<any>(null);
   const [requests, setRequests] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [departmentFilter, setDepartmentFilter] = useState<string>("");
 
-  const fetchQueue = () => {
-    const url = departmentFilter
-      ? `/api/staff/requests?departmentId=${departmentFilter}`
-      : `/api/staff/requests`;
+  // Status & Filter state
+  const [availabilityStatus, setAvailabilityStatus] = useState<string>("AVAILABLE");
+  const [showNotificationDrawer, setShowNotificationDrawer] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<string>("default");
 
-    fetch(url)
-      .then((res) => {
-        if (!res.ok) return { requests: [] };
-        return res.json();
-      })
+  const fetchStaffData = () => {
+    fetch("/api/staff/requests")
+      .then((res) => res.json())
       .then((d) => {
         setRequests(d.requests || []);
         setLoading(false);
@@ -37,253 +44,445 @@ export default function StaffQueuePage() {
         console.error(err);
         setLoading(false);
       });
+
+    fetch("/api/branding")
+      .then((res) => res.json())
+      .then((d) => {
+        if (d.branding) setBranding(d.branding);
+      });
   };
 
   useEffect(() => {
-    fetchQueue();
-    const interval = setInterval(fetchQueue, 4000); // Live poll
-    return () => clearInterval(interval);
-  }, [departmentFilter]);
+    // Check saved staff user in localStorage
+    const saved = localStorage.getItem("hx_staff_user");
+    if (saved) {
+      try {
+        const u = JSON.parse(saved);
+        setStaffUser(u);
+        setAvailabilityStatus(u.availabilityStatus || "AVAILABLE");
+        // Fetch notifications for staff member
+        fetch(`/api/notifications?userId=${u.id}`)
+          .then((res) => res.json())
+          .then((nd) => setNotifications(nd.notifications || []));
+      } catch (e) {}
+    } else {
+      // Default to Ahmed Khan (HK1001) demo staff if not logged in
+      setStaffUser({
+        id: "demo-ahmed-id",
+        staffId: "HK1001",
+        name: "Ahmed Khan",
+        designation: "Room Attendant",
+        departmentName: "Housekeeping",
+        assignedFloors: "[10]",
+      });
+    }
 
-  const handleAction = async (requestId: string, action: string) => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      setNotificationPermission(Notification.permission);
+    }
+
+    fetchStaffData();
+    const interval = setInterval(fetchStaffData, 4000); // Live poll updates
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleStatusToggle = async (newStatus: string) => {
+    setAvailabilityStatus(newStatus);
+    if (staffUser?.id) {
+      try {
+        await fetch("/api/staff/availability", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: staffUser.id,
+            status: newStatus,
+          }),
+        });
+
+        const updated = { ...staffUser, availabilityStatus: newStatus };
+        setStaffUser(updated);
+        localStorage.setItem("hx_staff_user", JSON.stringify(updated));
+      } catch (err) {
+        console.error("Failed to update status:", err);
+      }
+    }
+  };
+
+  const handleRequestPermission = async () => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      const perm = await Notification.requestPermission();
+      setNotificationPermission(perm);
+      if (perm === "granted" && staffUser?.id) {
+        // Register Device & Send Test Notification
+        fetch("/api/notifications", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "REGISTER_DEVICE",
+            userId: staffUser.id,
+            deviceType: /Mobi|Android/i.test(navigator.userAgent) ? "MOBILE_ANDROID" : "DESKTOP",
+          }),
+        });
+
+        new Notification("HotelXchange Notifications Enabled", {
+          body: "You will now receive instant push alerts for new room service requests!",
+          icon: branding?.logoUrl || "/favicon.ico",
+        });
+      }
+    }
+  };
+
+  const handleAccept = async (requestId: string) => {
+    try {
+      const res = await fetch("/api/staff/accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requestId,
+          userId: staffUser?.id || "demo-ahmed-id",
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        fetchStaffData();
+      } else {
+        alert(data.error || "Action failed");
+      }
+    } catch (err) {
+      alert("Network error accepting request");
+    }
+  };
+
+  const handleUpdateStatus = async (requestId: string, status: string) => {
     try {
       const res = await fetch("/api/staff/requests", {
-        method: "PATCH",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId, action }),
+        body: JSON.stringify({
+          requestId,
+          status,
+          userId: staffUser?.id,
+        }),
       });
-      const result = await res.json();
-      if (result.success) {
-        fetchQueue();
+
+      const data = await res.json();
+      if (res.ok) {
+        fetchStaffData();
       } else {
-        alert(result.error || "Action failed");
+        alert(data.error || "Status update failed");
       }
     } catch (err) {
       alert("Network error");
     }
   };
 
-  return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
-      {/* Header & Department Filters */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-        <div>
-          <div className="flex items-center gap-2">
-            <UserCheck className="w-6 h-6 text-[#0A4D7E]" />
-            <h1 className="text-2xl font-bold text-slate-900">Staff Work Queue</h1>
-          </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Accept incoming requests, track SLA deadlines, and fulfill guest orders.
-          </p>
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white p-4">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-4 border-[#B89759] border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-xs font-semibold text-slate-300">Loading Staff Workspace...</p>
         </div>
+      </div>
+    );
+  }
 
-        <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-slate-500" />
-          <select
-            value={departmentFilter}
-            onChange={(e) => setDepartmentFilter(e.target.value)}
-            className="text-xs p-2 border border-slate-200 rounded-xl bg-white font-medium text-slate-700 shadow-xs focus:outline-none focus:ring-2 focus:ring-[#0A4D7E]"
-          >
-            <option value="">All Departments Queue</option>
-            <option value="HK">Housekeeping</option>
-            <option value="ENG">Engineering</option>
-            <option value="FNB">Food & Beverage</option>
-            <option value="CON">Concierge</option>
-            <option value="FO">Front Office</option>
-            <option value="SR">Service Recovery</option>
-          </select>
+  const myWork = requests.filter(
+    (r) => r.currentAssigneeId === staffUser?.id || r.status === "SUBMITTED"
+  );
+  const unreadNotifs = notifications.filter((n) => !n.readAt).length;
 
-          <button
-            onClick={fetchQueue}
-            className="p-2 border border-slate-200 bg-white rounded-xl text-slate-600 hover:bg-slate-50 transition-colors"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 pb-24">
+      {/* HOTEL BRANDED STAFF HEADER */}
+      <div className="bg-gradient-to-b from-[#0A4D7E] via-[#063050] to-slate-950 px-4 pt-6 pb-5 border-b border-white/10 rounded-b-[2rem] shadow-xl">
+        <div className="max-w-4xl mx-auto">
+          {/* Top Bar: Hotel Logo, Staff Identity, Notifications & Exit */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-white p-1 flex items-center justify-center border border-[#B89759]">
+                {branding?.logoUrl ? (
+                  <img src={branding.logoUrl} alt={branding.hotelName} className="max-h-full object-contain" />
+                ) : (
+                  <Hotel className="w-6 h-6 text-[#0A4D7E]" />
+                )}
+              </div>
+
+              <div>
+                <span className="text-[10px] font-extrabold tracking-widest text-[#B89759] uppercase block">
+                  {branding?.hotelName || "Fortune Park Hotel"}
+                </span>
+                <h1 className="text-base font-extrabold text-white flex items-center gap-1.5">
+                  {staffUser?.name || "Ahmed Khan"}
+                  <span className="text-xs font-semibold text-slate-300">({staffUser?.staffId || "HK1001"})</span>
+                </h1>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Notification Drawer Trigger */}
+              <button
+                onClick={() => setShowNotificationDrawer(true)}
+                className="relative p-2 rounded-xl bg-white/10 border border-white/15 text-white hover:bg-white/20 transition-colors"
+                title="Notifications"
+              >
+                <Bell className="w-4 h-4 text-[#B89759]" />
+                {unreadNotifs > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] font-extrabold flex items-center justify-center">
+                    {unreadNotifs}
+                  </span>
+                )}
+              </button>
+
+              <Link
+                href="/staff/login"
+                className="p-2 rounded-xl bg-white/10 border border-white/15 text-slate-300 hover:text-white"
+                title="Switch Staff / Sign Out"
+              >
+                <LogOut className="w-4 h-4" />
+              </Link>
+            </div>
+          </div>
+
+          {/* Availability Status Bar */}
+          <div className="bg-white/10 backdrop-blur-md p-3 rounded-2xl border border-white/15 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className={`w-3 h-3 rounded-full ${
+                availabilityStatus === "AVAILABLE" ? "bg-emerald-400 animate-pulse" :
+                availabilityStatus === "BUSY" ? "bg-amber-400" :
+                availabilityStatus === "ON_BREAK" ? "bg-indigo-400" : "bg-rose-400"
+              }`}></span>
+              <span className="text-xs font-bold text-white">Status: {availabilityStatus.replace("_", " ")}</span>
+            </div>
+
+            {/* Quick Availability Toggles */}
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => handleStatusToggle("AVAILABLE")}
+                className={`px-3 py-1 rounded-xl text-[11px] font-bold transition-all ${
+                  availabilityStatus === "AVAILABLE"
+                    ? "bg-emerald-500 text-slate-950 shadow-md"
+                    : "bg-white/5 text-slate-300 hover:bg-white/10"
+                }`}
+              >
+                AVAILABLE
+              </button>
+              <button
+                onClick={() => handleStatusToggle("BUSY")}
+                className={`px-3 py-1 rounded-xl text-[11px] font-bold transition-all ${
+                  availabilityStatus === "BUSY"
+                    ? "bg-amber-500 text-slate-950 shadow-md"
+                    : "bg-white/5 text-slate-300 hover:bg-white/10"
+                }`}
+              >
+                BUSY
+              </button>
+              <button
+                onClick={() => handleStatusToggle("ON_BREAK")}
+                className={`px-3 py-1 rounded-xl text-[11px] font-bold transition-all ${
+                  availabilityStatus === "ON_BREAK"
+                    ? "bg-indigo-500 text-white shadow-md"
+                    : "bg-white/5 text-slate-300 hover:bg-white/10"
+                }`}
+              >
+                ON BREAK
+              </button>
+            </div>
+          </div>
+
+          {/* Browser / PWA Notification Banner if not granted */}
+          {notificationPermission !== "granted" && (
+            <div className="mt-3 bg-amber-500/15 border border-amber-500/30 p-3 rounded-2xl flex items-center justify-between text-xs">
+              <span className="text-amber-200">Enable Push Notifications for instant task alerts.</span>
+              <button
+                onClick={handleRequestPermission}
+                className="px-3 py-1.5 bg-[#B89759] text-slate-950 font-bold text-[11px] rounded-xl hover:bg-[#a38243]"
+              >
+                Allow Notifications
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      {loading ? (
-        <div className="py-12 text-center text-slate-500 text-sm">Loading staff queue...</div>
-      ) : requests.length === 0 ? (
-        <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center text-slate-500">
-          <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
-          <h3 className="text-base font-bold text-slate-800">Queue is Clear!</h3>
-          <p className="text-xs text-slate-500 mt-1">No active requests pending action right now.</p>
+      <div className="max-w-4xl mx-auto px-4 mt-6">
+        {/* WORKSTREAM SUMMARY */}
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-base font-extrabold text-white">Active Queue Workstation</h2>
+            <p className="text-xs text-slate-400">Assigned requests for your current floor & department.</p>
+          </div>
+          <button
+            onClick={fetchStaffData}
+            className="p-2 rounded-xl bg-slate-900 border border-white/10 text-xs font-bold text-slate-300 hover:text-white flex items-center gap-1"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Refresh
+          </button>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {requests.map((req) => {
-            const isFnb = req.type === "FNB";
-            const isCompleted = req.status === "COMPLETED" || req.status === "DELIVERED";
-            const sla = req.slaStatus;
 
-            return (
-              <div
-                key={req.id}
-                className={`bg-white rounded-2xl border p-5 shadow-xs flex flex-col justify-between transition-all ${
-                  sla.isBreached
-                    ? "border-rose-300 ring-2 ring-rose-100"
-                    : sla.isAtRisk
-                    ? "border-amber-300 ring-2 ring-amber-100"
-                    : "border-slate-200"
-                }`}
-              >
-                <div>
-                  {/* Top Bar Badges */}
-                  <div className="flex items-center justify-between gap-2 mb-3">
-                    <span className="text-xs font-extrabold px-2.5 py-1 rounded-lg bg-[#0A4D7E]/10 text-[#0A4D7E]">
-                      Room {req.room.roomNumber}
-                    </span>
+        {/* WORK REQUEST CARDS */}
+        {requests.length === 0 ? (
+          <div className="bg-slate-900/80 border border-white/10 p-12 rounded-3xl text-center space-y-2">
+            <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto" />
+            <h3 className="text-base font-bold text-white">All Caught Up!</h3>
+            <p className="text-xs text-slate-400">No pending room requests assigned to your queue.</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {requests.map((req) => {
+              const isAssignedToMe = req.currentAssigneeId === staffUser?.id;
+              const isSubmitted = req.status === "SUBMITTED" || req.status === "UNASSIGNED";
+              const isAccepted = req.status === "ACCEPTED" || req.status === "PREPARING";
+              const isReady = req.status === "READY" || req.status === "IN_PROGRESS";
+              const isCompleted = req.status === "COMPLETED" || req.status === "DELIVERED";
 
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                          req.priority === "URGENT"
-                            ? "bg-rose-100 text-rose-800"
-                            : req.priority === "HIGH"
-                            ? "bg-amber-100 text-amber-800"
-                            : "bg-slate-100 text-slate-700"
-                        }`}
-                      >
-                        {req.priority}
-                      </span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                        {req.currentDepartment.name}
-                      </span>
-                    </div>
-                  </div>
-
-                  <h3 className="text-base font-bold text-slate-900 mb-1">{req.category.name}</h3>
-
-                  {req.details && (
-                    <p className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100 mb-3">
-                      "{req.details}"
-                    </p>
-                  )}
-
-                  {/* F&B Lines Summary */}
-                  {isFnb && req.orderLines && req.orderLines.length > 0 && (
-                    <div className="bg-amber-50/50 p-2.5 rounded-xl border border-amber-200/60 mb-3 text-xs">
-                      <span className="font-bold text-amber-900 block mb-1">F&B Items:</span>
-                      {req.orderLines.map((line: any) => (
-                        <div key={line.id} className="text-slate-700">
-                          • {line.quantity}x {line.menuItem?.name}
+              return (
+                <div
+                  key={req.id}
+                  className={`bg-slate-900/90 border p-5 rounded-3xl shadow-xl transition-all ${
+                    isSubmitted
+                      ? "border-amber-500/40 bg-gradient-to-r from-slate-900 via-slate-900 to-amber-950/20"
+                      : isAccepted
+                      ? "border-[#0A4D7E] bg-slate-900"
+                      : "border-white/10 bg-slate-900/70"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-2xl bg-[#0A4D7E] text-white font-extrabold text-base flex items-center justify-center shadow-md">
+                        {req.room?.roomNumber || "101"}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-extrabold text-white">
+                            {req.category?.name || "Service Request"}
+                          </span>
+                          <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                            req.priority === "URGENT" ? "bg-rose-500/20 text-rose-300 border border-rose-500/30" : "bg-blue-500/20 text-blue-300"
+                          }`}>
+                            {req.priority}
+                          </span>
                         </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* SLA Tracker Progress Bar */}
-                  <div className="mt-2 mb-4">
-                    <div className="flex items-center justify-between text-[11px] mb-1">
-                      <span className="text-slate-500 flex items-center gap-1">
-                        <Clock className="w-3 h-3 text-slate-400" />
-                        Elapsed: {sla.elapsedMinutes}m / {sla.targetMinutes}m target
-                      </span>
-                      <span
-                        className={`font-bold ${
-                          sla.isBreached
-                            ? "text-rose-600"
-                            : sla.isAtRisk
-                            ? "text-amber-600"
-                            : "text-emerald-600"
-                        }`}
-                      >
-                        {sla.isBreached ? "BREACHED" : sla.isAtRisk ? "AT RISK" : "ON TIME"}
-                      </span>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Guest: <strong className="text-white font-semibold">{req.guestName || "Guest"}</strong> • Floor {req.room?.roomNumber?.slice(0, -2) || "10"}
+                        </p>
+                      </div>
                     </div>
 
-                    <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full transition-all ${
-                          sla.isBreached
-                            ? "bg-rose-500"
-                            : sla.isAtRisk
-                            ? "bg-amber-500"
-                            : "bg-emerald-500"
-                        }`}
-                        style={{ width: `${Math.min(100, sla.percentageUsed)}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Status & Controls */}
-                <div className="border-t border-slate-100 pt-3">
-                  <div className="text-[11px] text-slate-500 mb-2">
-                    Assignee:{" "}
-                    <span className="font-semibold text-slate-800">
-                      {req.currentAssignee?.name || "Unassigned"}
+                    <span className={`text-xs font-bold px-3 py-1 rounded-xl ${
+                      isCompleted ? "bg-emerald-500/20 text-emerald-300" :
+                      isAccepted ? "bg-[#0A4D7E] text-white" : "bg-amber-500/20 text-amber-300"
+                    }`}>
+                      {req.status.replace("_", " ")}
                     </span>
                   </div>
 
-                  {!isCompleted ? (
-                    <div className="grid grid-cols-2 gap-2">
-                      {!req.accepted_at && (
+                  {/* Request Details */}
+                  <div className="bg-white/5 p-3.5 rounded-2xl border border-white/10 text-xs text-slate-200 mb-4">
+                    <p className="font-semibold text-white">"{req.details}"</p>
+                    {req.orderLines?.length > 0 && (
+                      <div className="mt-2 text-[11px] text-slate-300 space-y-0.5 border-t border-white/10 pt-2">
+                        {req.orderLines.map((line: any) => (
+                          <p key={line.id}>• {line.quantity}x {line.menuItem?.name}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ACTION BUTTONS (Section 36 Large Touch-Friendly Buttons) */}
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-[#B89759]" />
+                      <span>SLA ~{req.category?.slaTargetMinutes || 15}m</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {isSubmitted && (
                         <button
-                          onClick={() => handleAction(req.id, "ACCEPT")}
-                          className="col-span-2 py-2 bg-amber-500 text-white font-bold text-xs rounded-xl hover:bg-amber-600 transition-colors flex items-center justify-center gap-1"
+                          onClick={() => handleAccept(req.id)}
+                          className="px-6 py-3 bg-[#B89759] text-slate-950 font-extrabold text-xs rounded-2xl hover:bg-[#a38243] transition-colors shadow-lg flex items-center gap-1.5"
                         >
-                          <Check className="w-3.5 h-3.5" />
-                          Accept Request
+                          <CheckCircle2 className="w-4 h-4" />
+                          ACCEPT WORK
                         </button>
                       )}
 
-                      {req.accepted_at && !isFnb && (
-                        <>
-                          {req.status !== "IN_PROGRESS" && (
-                            <button
-                              onClick={() => handleAction(req.id, "IN_PROGRESS")}
-                              className="py-2 bg-[#0A4D7E] text-white font-bold text-xs rounded-xl hover:bg-[#083e66]"
-                            >
-                              In Progress
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleAction(req.id, "COMPLETE")}
-                            className="col-span-2 py-2 bg-emerald-600 text-white font-bold text-xs rounded-xl hover:bg-emerald-700"
-                          >
-                            Mark Complete
-                          </button>
-                        </>
+                      {isAccepted && (
+                        <button
+                          onClick={() => handleUpdateStatus(req.id, "IN_PROGRESS")}
+                          className="px-6 py-3 bg-indigo-600 text-white font-extrabold text-xs rounded-2xl hover:bg-indigo-700 transition-colors shadow-lg flex items-center gap-1.5"
+                        >
+                          <Play className="w-4 h-4" />
+                          START WORK
+                        </button>
                       )}
 
-                      {req.accepted_at && isFnb && (
-                        <>
-                          {req.status === "SUBMITTED" || req.status === "ACCEPTED" ? (
-                            <button
-                              onClick={() => handleAction(req.id, "PREPARING")}
-                              className="col-span-2 py-2 bg-[#0A4D7E] text-white font-bold text-xs rounded-xl hover:bg-[#083e66]"
-                            >
-                              Kitchen Preparing
-                            </button>
-                          ) : req.status === "PREPARING" ? (
-                            <button
-                              onClick={() => handleAction(req.id, "READY")}
-                              className="col-span-2 py-2 bg-indigo-600 text-white font-bold text-xs rounded-xl hover:bg-indigo-700"
-                            >
-                              Mark Ready
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleAction(req.id, "DELIVERED")}
-                              className="col-span-2 py-2 bg-emerald-600 text-white font-bold text-xs rounded-xl hover:bg-emerald-700"
-                            >
-                              Delivered to Room
-                            </button>
-                          )}
-                        </>
+                      {(isReady || req.status === "IN_PROGRESS") && (
+                        <button
+                          onClick={() => handleUpdateStatus(req.id, "COMPLETED")}
+                          className="px-6 py-3 bg-emerald-600 text-white font-extrabold text-xs rounded-2xl hover:bg-emerald-700 transition-colors shadow-lg flex items-center gap-1.5"
+                        >
+                          <CheckSquare className="w-4 h-4" />
+                          MARK COMPLETE
+                        </button>
                       )}
                     </div>
-                  ) : (
-                    <span className="block text-center text-xs font-bold text-emerald-700 bg-emerald-50 py-2 rounded-xl">
-                      ✓ Fulfilled
-                    </span>
-                  )}
+                  </div>
                 </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* NOTIFICATION DRAWER MODAL */}
+      {showNotificationDrawer && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
+          <div className="bg-slate-900 border border-white/10 w-full max-w-md rounded-t-[2.5rem] sm:rounded-3xl max-h-[85vh] flex flex-col justify-between p-6 text-white shadow-2xl">
+            <div>
+              <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-4">
+                <div className="flex items-center gap-2">
+                  <Bell className="w-5 h-5 text-[#B89759]" />
+                  <h3 className="text-base font-bold">In-App Notification Center</h3>
+                </div>
+                <button
+                  onClick={() => setShowNotificationDrawer(false)}
+                  className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-slate-400 hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-            );
-          })}
+
+              {notifications.length === 0 ? (
+                <div className="py-12 text-center text-slate-400 text-xs">No notifications received yet.</div>
+              ) : (
+                <div className="space-y-3 overflow-y-auto max-h-[55vh] pr-1">
+                  {notifications.map((n) => (
+                    <div key={n.id} className="p-3.5 rounded-2xl bg-white/5 border border-white/10 text-xs space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#B89759]">{n.title}</span>
+                        <span className="text-[10px] text-slate-400">
+                          {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <p className="text-slate-300">{n.body}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="pt-4 border-t border-white/10 mt-4">
+              <button
+                onClick={() => setShowNotificationDrawer(false)}
+                className="w-full py-3 bg-white/10 text-white font-bold text-xs rounded-2xl hover:bg-white/15"
+              >
+                Close Notifications
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

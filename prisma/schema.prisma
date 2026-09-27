@@ -11,7 +11,11 @@ enum UserRole {
   GUEST
   STAFF
   SUPERVISOR
-  OPS_SUPERVISOR
+  OPERATIONS_MANAGER
+  PROPERTY_ADMIN
+  CHAIN_ADMIN
+  PLATFORM_ADMIN
+  FNB_MANAGER
   ADMIN
 }
 
@@ -29,6 +33,7 @@ enum PriorityLevel {
 }
 
 enum RequestStatus {
+  UNASSIGNED
   SUBMITTED
   ACCEPTED
   IN_PROGRESS
@@ -44,6 +49,7 @@ enum AlertType {
   SLA_BREACH
   LOW_RATING
   ESCALATION
+  UNASSIGNED_ALERT
 }
 
 enum AlertSeverity {
@@ -65,13 +71,62 @@ enum SessionStatus {
   CANCELLED
 }
 
-model Property {
+enum StaffStatus {
+  SCHEDULED
+  AVAILABLE
+  BUSY
+  ON_BREAK
+  OFFLINE
+  LEAVE
+  ABSENT
+  DISABLED
+}
+
+model Tenant {
   id        String   @id @default(uuid())
-  name      String
-  timezone  String   @default("UTC")
-  status    String   @default("ACTIVE")
+  name      String   // e.g. Fortune Group
+  code      String   @unique
   createdAt DateTime @default(now())
 
+  chains       Chain[]
+  properties   Property[]
+  pmsStays     PmsStay[]
+  sessions     GuestStaySession[]
+  users        User[]
+  devices      NotificationDevice[]
+  notifications NotificationLog[]
+}
+
+model Chain {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String   // e.g. Fortune Hotels
+  createdAt DateTime @default(now())
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  properties Property[]
+}
+
+model Property {
+  id         String   @id @default(uuid())
+  tenantId   String   @default("tenant-fortune")
+  chainId    String?
+  name       String   // e.g. Fortune Park Hotel
+  shortName  String   @default("Fortune Park")
+  address    String   @default("Dubai Investment Park, Dubai, UAE")
+  city       String   @default("Dubai")
+  country    String   @default("UAE")
+  timezone   String   @default("Asia/Dubai")
+  currency   String   @default("AED")
+  phone      String   @default("+971 4 885 4888")
+  email      String   @default("info@fortuneparkhotel.ae")
+  status     String   @default("ACTIVE")
+  createdAt  DateTime @default(now())
+
+  tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  chain        Chain?               @relation(fields: [chainId], references: [id], onDelete: SetNull)
+  branding     PropertyBranding?
+  floors       Floor[]
   rooms        Room[]
   users        User[]
   departments  Department[]
@@ -80,18 +135,57 @@ model Property {
   menuSections MenuSection[]
   pmsStays     PmsStay[]
   sessions     GuestStaySession[]
+  shifts       Shift[]
+  staffShifts  StaffShift[]
+  routingRules RoutingRule[]
+  devices      NotificationDevice[]
+  notifications NotificationLog[]
+}
+
+model PropertyBranding {
+  id                String   @id @default(uuid())
+  propertyId        String   @unique
+  hotelName         String   @default("Fortune Park Hotel")
+  shortName         String   @default("Fortune Park")
+  logoUrl           String   @default("https://fortunehotels.ae/wp-content/uploads/2021/04/fortune-logo-1.png")
+  faviconUrl        String?
+  primaryColor      String   @default("#0A4D7E")
+  secondaryColor    String   @default("#B89759")
+  accentColor       String   @default("#10B981")
+  loginBgUrl        String?
+  loginWelcomeText  String   @default("Welcome to Fortune Park Hotel")
+  staffPortalTitle  String   @default("HotelXchange Operations")
+  footerText        String   @default("© 2026 Fortune Park Hotel • Powered by HotelXchange")
+  updatedAt         DateTime @updatedAt
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+}
+
+model Floor {
+  id          String   @id @default(uuid())
+  propertyId  String
+  floorNumber Int
+  name        String   // e.g. Floor 10
+  sortOrder   Int      @default(0)
+
+  property Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  rooms    Room[]
+  requests Request[]
 }
 
 model Room {
   id              String   @id @default(uuid())
   propertyId      String
+  floorId         String?
   roomNumber      String
+  roomType        String   @default("Standard Room")
   qrToken         String   @unique
-  registeredGuest String   @default("Mr. Guest")
+  registeredGuest String   @default("Vacant / Available")
   linkStatus      String   @default("ACTIVE")
   createdAt       DateTime @default(now())
 
   property Property           @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  floor    Floor?             @relation(fields: [floorId], references: [id], onDelete: SetNull)
   requests Request[]
   pmsStays PmsStay[]
   sessions GuestStaySession[]
@@ -99,7 +193,7 @@ model Room {
 
 model PmsStay {
   id                 String    @id @default(uuid())
-  tenantId           String    @default("tenant-default")
+  tenantId           String    @default("tenant-fortune")
   propertyId         String
   roomId             String
   reservationId     String    @unique // e.g. STAY-10045
@@ -111,6 +205,7 @@ model PmsStay {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
+  tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   property Property           @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   room     Room               @relation(fields: [roomId], references: [id], onDelete: Cascade)
   sessions GuestStaySession[]
@@ -119,7 +214,7 @@ model PmsStay {
 
 model GuestStaySession {
   id                 String        @id @default(uuid())
-  tenantId           String        @default("tenant-default")
+  tenantId           String        @default("tenant-fortune")
   propertyId         String
   roomId             String
   stayId             String
@@ -128,13 +223,14 @@ model GuestStaySession {
   expectedCheckOutAt DateTime
   actualCheckOutAt   DateTime?
   sessionStatus      SessionStatus @default(ACTIVE)
-  secureAccessToken  String        @unique // Opaque non-guessable token (hx-session-...)
+  secureAccessToken  String        @unique
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
-  property Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  room     Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  stay     PmsStay   @relation(fields: [stayId], references: [id], onDelete: Cascade)
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  room     Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  stay     PmsStay  @relation(fields: [stayId], references: [id], onDelete: Cascade)
   requests Request[]
 }
 
@@ -146,12 +242,14 @@ model Department {
   supervisorId String?
   active       Boolean  @default(true)
 
-  property    Property            @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  categories  Category[]
-  users       User[]
-  eligibility StaffEligibility[]
-  requests    Request[]
-  assignments AssignmentHistory[]
+  property     Property           @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  categories   Category[]
+  users        User[]
+  eligibility  StaffEligibility[]
+  requests     Request[]
+  assignments  AssignmentHistory[]
+  staffShifts  StaffShift[]
+  routingRules RoutingRule[]
 }
 
 model Category {
@@ -165,25 +263,41 @@ model Category {
   priorityRule             String   @default("NORMAL")
   active                   Boolean  @default(true)
 
-  department  Department         @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-  eligibility StaffEligibility[]
-  requests    Request[]
+  department   Department         @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  eligibility  StaffEligibility[]
+  requests     Request[]
+  routingRules RoutingRule[]
 }
 
 model User {
-  id           String   @id @default(uuid())
-  propertyId   String
-  departmentId String?
-  name         String
-  email        String   @unique
-  role         UserRole @default(STAFF)
-  active       Boolean  @default(true)
+  id                 String      @id @default(uuid())
+  tenantId           String      @default("tenant-fortune")
+  propertyId         String
+  departmentId       String?
+  staffId            String?     @unique // e.g. HK1001, FB2001
+  employeeCode       String?
+  name               String
+  email              String      @unique
+  passwordHash       String      @default("password123")
+  mobileNumber       String?
+  profilePhoto       String?
+  designation        String      @default("Staff")
+  role               UserRole    @default(STAFF)
+  assignedFloors     String      @default("[]") // JSON string of assigned floor numbers e.g. [10]
+  availabilityStatus StaffStatus @default(AVAILABLE)
+  maxActiveRequests  Int         @default(3)
+  active             Boolean     @default(true)
+  createdAt          DateTime    @default(now())
 
-  property          Property            @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  department        Department?         @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  tenant            Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  property          Property             @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  department        Department?          @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   eligibility       StaffEligibility[]
-  assignedRequests  Request[]           @relation("CurrentAssignee")
+  assignedRequests  Request[]            @relation("CurrentAssignee")
   assignmentHistory AssignmentHistory[]
+  staffShifts       StaffShift[]
+  devices           NotificationDevice[]
+  notifications     NotificationLog[]
 }
 
 model StaffEligibility {
@@ -201,10 +315,57 @@ model StaffEligibility {
   @@unique([userId, departmentId, categoryId])
 }
 
+model Shift {
+  id         String   @id @default(uuid())
+  propertyId String
+  name       String   // e.g. Morning Shift, Evening Shift
+  startTime  String   // e.g. 07:00
+  endTime    String   // e.g. 15:00
+  createdAt  DateTime @default(now())
+
+  property    Property     @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  staffShifts StaffShift[]
+}
+
+model StaffShift {
+  id            String      @id @default(uuid())
+  propertyId    String
+  departmentId  String
+  userId        String
+  shiftId       String
+  date          DateTime
+  assignedFloor String      @default("Floor 10")
+  rosterStatus  StaffStatus @default(SCHEDULED)
+
+  property   Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shift      Shift      @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date, shiftId])
+}
+
+model RoutingRule {
+  id                       String   @id @default(uuid())
+  propertyId               String
+  departmentId             String
+  categoryId               String?
+  assignmentStrategy       String   @default("ROUND_ROBIN") // ROUND_ROBIN, LEAST_ACTIVE_WORK, MANUAL
+  autoReassign             Boolean  @default(true)
+  acceptanceTimeoutMinutes Int      @default(2)
+  fallbackStrategy         String   @default("ROUND_ROBIN") // ROUND_ROBIN, SUPERVISOR
+
+  property   Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  category   Category?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+}
+
 model Request {
   id                  String        @id @default(uuid())
+  tenantId            String        @default("tenant-fortune")
   propertyId          String
   roomId              String
+  floorId             String?
   categoryId          String
   stayId              String?
   guestSessionId      String?
@@ -212,9 +373,13 @@ model Request {
   priority            PriorityLevel @default(MEDIUM)
   status              RequestStatus @default(SUBMITTED)
   created_at          DateTime      @default(now())
+  assigned_at         DateTime?
   accepted_at         DateTime?
+  started_at          DateTime?
   completed_at        DateTime?
   delivered_at        DateTime?
+  sla_due_at          DateTime?
+  acceptance_due_at   DateTime?
   currentDepartmentId String
   currentAssigneeId   String?
   trackingToken       String        @unique
@@ -225,17 +390,57 @@ model Request {
 
   property          Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   room              Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  floor             Floor?            @relation(fields: [floorId], references: [id], onDelete: SetNull)
   category          Category          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   stay              PmsStay?          @relation(fields: [stayId], references: [id], onDelete: SetNull)
   guestSession      GuestStaySession? @relation(fields: [guestSessionId], references: [id], onDelete: SetNull)
   currentDepartment Department        @relation(fields: [currentDepartmentId], references: [id], onDelete: Cascade)
   currentAssignee   User?             @relation("CurrentAssignee", fields: [currentAssigneeId], references: [id], onDelete: SetNull)
 
-  assignments AssignmentHistory[]
-  events      RequestEvent[]
-  orderLines  OrderLine[]
-  feedback    Feedback?
-  alerts      Alert[]
+  assignments   AssignmentHistory[]
+  events        RequestEvent[]
+  orderLines    OrderLine[]
+  feedback      Feedback?
+  alerts        Alert[]
+  notifications NotificationLog[]
+}
+
+model NotificationDevice {
+  id               String   @id @default(uuid())
+  tenantId         String   @default("tenant-fortune")
+  propertyId       String
+  userId           String
+  deviceId         String   @unique
+  deviceType       String   @default("DESKTOP") // DESKTOP, MOBILE_ANDROID, MOBILE_IOS, TABLET
+  browser          String   @default("Chrome")
+  pushSubscription String   @default("{}") // JSON string for Web Push subscription
+  enabled          Boolean  @default(true)
+  lastSeen         DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model NotificationLog {
+  id         String   @id @default(uuid())
+  tenantId   String   @default("tenant-fortune")
+  propertyId String
+  requestId  String?
+  userId     String
+  channel    String   @default("IN_APP") // IN_APP, WEB_PUSH, EMAIL
+  type       String   @default("ASSIGNMENT_NOTIFICATION") // ASSIGNMENT_NOTIFICATION, DEPARTMENT_ALERT, MANAGER_ALERT, SLA_WARNING
+  title      String
+  body       String
+  status     String   @default("DELIVERED") // CREATED, SENT, DELIVERED, READ, ACTIONED, FAILED
+  readAt     DateTime?
+  createdAt  DateTime @default(now())
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  request  Request? @relation(fields: [requestId], references: [id], onDelete: SetNull)
 }
 
 model AssignmentHistory {
@@ -351,6 +556,8 @@ model Alert {
 
 model AdminAudit {
   id          String   @id @default(uuid())
+  tenantId    String   @default("tenant-fortune")
+  propertyId  String?
   actorId     String
   action      String
   entityType  String
